@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import csv, logging, re, sys, time
-from datetime import date
+import argparse, csv, logging, re, sys, time
+from datetime import date, datetime
 from urllib.parse import unquote, urljoin
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -66,8 +66,8 @@ def translate_category(ar_cat):
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-def today_ar():
-    t=date.today(); return f"{t.day} {M2AR[t.month]} {t.year}"
+def date_to_ar(target_date=None):
+    t=target_date or date.today(); return f"{t.day} {M2AR[t.month]} {t.year}"
 
 def setup_driver():
     o=Options()
@@ -93,9 +93,9 @@ def get_categories(driver):
     ]
     log.info(f"📂 {len(cats)} categories"); return cats
 
-def get_article_links(driver, url, cat_name=""):
+def get_article_links(driver, url, cat_name="", target_date=None):
     log.info(f"📰 Collecting from: {cat_name}")
-    tday=today_ar(); arts=[]; seen=set()
+    tday=date_to_ar(target_date); arts=[]; seen=set()
     try:
         driver.get(url)
         WebDriverWait(driver,20).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
@@ -126,7 +126,7 @@ def get_article_links(driver, url, cat_name=""):
         log.warning(f"  ⚠️ Scroll error in {cat_name}: {e.__class__.__name__}")
     log.info(f"  ✅ {len(arts)} links in {cat_name}"); return arts
 
-def scrape_article(driver, url, category=""):
+def scrape_article(driver, url, category="", target_date=None):
     for attempt in range(3):
         try:
             driver.get(url)
@@ -172,7 +172,7 @@ def scrape_article(driver, url, category=""):
             # Date check
             try:
                 dt=driver.find_element(By.CSS_SELECTOR,"time").text.strip()
-                if dt and today_ar() not in dt:
+                if dt and date_to_ar(target_date) not in dt:
                     log.info(f"  ⏭️ Not today: {title[:40]}…"); return None
             except: pass
             log.info(f"  ✅ [{final_cat}] {title[:50]}…")
@@ -194,14 +194,26 @@ def save_to_csv(data):
             w.writerow({k:" ".join(re.sub(r"<[^>]+>","",str(r.get(k,""))).split()) for k in fields})
     log.info(f"💾 {len(data)} articles → {OUTPUT}")
 
+def parse_args():
+    p=argparse.ArgumentParser(description="Scrape winwin.com articles for a specific date.")
+    p.add_argument("--date","-d",type=str,default=None,
+        help="Target date in YYYY-MM-DD format (default: today). Example: --date 2026-04-07")
+    args=p.parse_args()
+    if args.date:
+        try: return datetime.strptime(args.date,"%Y-%m-%d").date()
+        except ValueError:
+            print(f"❌ Invalid date format: {args.date}. Use YYYY-MM-DD."); sys.exit(1)
+    return date.today()
+
 def main():
+    target_date=parse_args()
     t0=time.time()
-    log.info(f"🚀 winwin.com Scraper | Today: {date.today()} ({today_ar()})")
+    log.info(f"🚀 winwin.com Scraper | Target date: {target_date} ({date_to_ar(target_date)})")
     driver=setup_driver(); links=[]; seen=set()
     try:
         for c in get_categories(driver):
             try:
-                for l in get_article_links(driver,c["url"],c["name"]):
+                for l in get_article_links(driver,c["url"],c["name"],target_date):
                     if l["url"] not in seen: seen.add(l["url"]); links.append(l)
             except Exception as e:
                 log.warning(f"⚠️ Category {c['name']} failed: {e.__class__.__name__}, recreating driver…")
@@ -217,7 +229,7 @@ def main():
         for i,info in enumerate(links,1):
             log.info(f"[{i}/{len(links)}]")
             try:
-                a=scrape_article(driver,info["url"],info.get("category",""))
+                a=scrape_article(driver,info["url"],info.get("category",""),target_date)
                 if a and a["title"] not in seen_t: seen_t.add(a["title"]); results.append(a)
             except (InvalidSessionIdException, WebDriverException):
                 log.warning(f"💀 Driver died, recreating…")
@@ -225,7 +237,7 @@ def main():
                 except: pass
                 driver=setup_driver()
                 try:
-                    a=scrape_article(driver,info["url"],info.get("category",""))
+                    a=scrape_article(driver,info["url"],info.get("category",""),target_date)
                     if a and a["title"] not in seen_t: seen_t.add(a["title"]); results.append(a)
                 except: pass
             except Exception as e:
