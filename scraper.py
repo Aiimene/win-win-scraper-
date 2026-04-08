@@ -95,7 +95,12 @@ def get_categories(driver):
 
 def get_article_links(driver, url, cat_name="", target_date=None):
     log.info(f"📰 Collecting from: {cat_name}")
-    tday=date_to_ar(target_date); arts=[]; seen=set()
+    td = target_date or date.today()
+    tday=date_to_ar(td); arts=[]; seen=set()
+    # More scrolls needed for older dates (roughly 10 articles/scroll)
+    days_ago = (date.today() - td).days
+    max_scrolls = min(25 + days_ago * 5, 200)
+    log.info(f"  📅 Target: {tday} ({days_ago} days ago, max {max_scrolls} scrolls)")
     try:
         driver.get(url)
         WebDriverWait(driver,20).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
@@ -104,16 +109,31 @@ def get_article_links(driver, url, cat_name="", target_date=None):
         log.warning(f"  ⚠️ Failed to load {cat_name}: {e.__class__.__name__}"); return arts
     try:
         last_h=driver.execute_script("return document.body.scrollHeight"); stale=0
-        for _ in range(25):
+        found_target_date = False
+        passed_target_date = False
+        for scroll_i in range(max_scrolls):
             for a in driver.find_elements(By.CSS_SELECTOR,"a[href]"):
                 try:
                     h=a.get_attribute("href")
                     if not h or h in seen: continue
                     dec=unquote(h)
                     if "/الأخبار/" not in dec: continue
-                    if tday in (a.text or ""):
+                    card_text = a.text or ""
+                    if tday in card_text:
                         seen.add(h); arts.append({"url":h,"category":cat_name})
+                        found_target_date = True
+                    # Check if we scrolled past the target date (older articles visible)
+                    elif found_target_date:
+                        # If we already found target date articles and now see different dates
+                        for m_name, m_num in AR_MONTHS.items():
+                            if m_name in card_text:
+                                passed_target_date = True
+                                break
                 except: continue
+            # Stop if we found articles and then scrolled past them
+            if found_target_date and passed_target_date and len(arts) > 0:
+                log.info(f"  📍 Found {len(arts)} articles, scrolled past target date. Stopping.")
+                break
             driver.execute_script("window.scrollTo(0,document.body.scrollHeight);")
             time.sleep(2)
             nh=driver.execute_script("return document.body.scrollHeight")
@@ -122,6 +142,8 @@ def get_article_links(driver, url, cat_name="", target_date=None):
                 if stale>=3: break
             else: stale=0
             last_h=nh
+            if scroll_i % 10 == 0 and scroll_i > 0:
+                log.info(f"  🔄 Scroll {scroll_i}/{max_scrolls}, {len(arts)} links so far…")
     except Exception as e:
         log.warning(f"  ⚠️ Scroll error in {cat_name}: {e.__class__.__name__}")
     log.info(f"  ✅ {len(arts)} links in {cat_name}"); return arts
@@ -169,11 +191,10 @@ def scrape_article(driver, url, category="", target_date=None):
             # Translate to English: prefer page tag, fallback to listing category
             raw_cat = page_cat or category or ""
             final_cat = translate_category(raw_cat)
-            # Date check
+            # Get date from article page
+            dt = ""
             try:
                 dt=driver.find_element(By.CSS_SELECTOR,"time").text.strip()
-                if dt and date_to_ar(target_date) not in dt:
-                    log.info(f"  ⏭️ Not today: {title[:40]}…"); return None
             except: pass
             # Get the date text
             article_date = dt if dt else date_to_ar(target_date)
