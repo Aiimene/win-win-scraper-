@@ -175,8 +175,10 @@ def scrape_article(driver, url, category="", target_date=None):
                 if dt and date_to_ar(target_date) not in dt:
                     log.info(f"  ⏭️ Not today: {title[:40]}…"); return None
             except: pass
+            # Get the date text
+            article_date = dt if dt else date_to_ar(target_date)
             log.info(f"  ✅ [{final_cat}] {title[:50]}…")
-            return {"title":title,"description":desc,"image_url":img,"category":final_cat}
+            return {"title":title,"description":desc,"image_url":img,"date":article_date,"category":final_cat}
         except InvalidSessionIdException:
             log.warning(f"  💀 Session dead at attempt {attempt+1}, need new driver")
             raise
@@ -186,7 +188,7 @@ def scrape_article(driver, url, category="", target_date=None):
     return None
 
 def save_to_csv(data):
-    fields=["title","description","image_url","category"]
+    fields=["title","description","image_url","date","category"]
     with open(OUTPUT,"w",newline="",encoding="utf-8-sig") as f:
         w=csv.DictWriter(f,fieldnames=fields,quoting=csv.QUOTE_ALL)
         w.writeheader()
