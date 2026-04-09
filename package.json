@@ -1,0 +1,13 @@
+{
+  "name": "winwin-scraper",
+  "version": "1.0.0",
+  "description": "winwin.com article scraper",
+  "main": "scraper.js",
+  "scripts": {
+    "start": "node scraper.js",
+    "scrape": "node scraper.js"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}
